@@ -14,7 +14,7 @@ let port = process.env.PORT || 3500;
 
 initIO(httpServer);
 
-httpServer.listen(port)
-console.log("Server started on ", port);
+httpServer.listen(port);
+console.log('Server started on ', port);
 
 getIO();
