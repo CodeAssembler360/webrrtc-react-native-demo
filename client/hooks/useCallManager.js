@@ -12,7 +12,7 @@ import {
 } from '../consts';
 import {generateRandomUser} from '../utils';
 
-const SOCKET_URL = 'https://rvekz.localtonet.com';
+const SOCKET_URL = 'http://localhost:3500';
 
 const RANDOM_USER = generateRandomUser();
 
@@ -20,7 +20,8 @@ const DEFAULT_USER_STATE = {
   id: RANDOM_USER,
   micEnabled: true,
   cameraEnabled: true,
-  stream: null,
+  videoTrack: null,
+  audioTrack: null,
 };
 
 const DEFAULT_MAP_STATE = {};
@@ -36,25 +37,32 @@ export const useCallManager = sessionId => {
   };
 
   const onSwitchCamera = () => {
-    for (const videoTrack of user.stream?.getVideoTracks()) {
-      videoTrack._switchCamera();
+    if (user.videoTrack) {
+      user.videoTrack._switchCamera();
     }
   };
 
   const onToggleCamera = () => {
     const nextState = !user.cameraEnabled;
-    for (const videoTrack of user.stream?.getVideoTracks()) {
-      videoTrack.enabled = nextState;
+    if (user.videoTrack) {
+      user.videoTrack.enabled = nextState;
+      setUser({...user, cameraEnabled: nextState});
     }
-    setUser({...user, cameraEnabled: nextState});
   };
 
   const onToggleMic = () => {
     const nextState = !user.micEnabled;
-    for (const audioTrack of user.stream?.getAudioTracks()) {
-      audioTrack.enabled = nextState;
+    if (user.audioTrack) {
+      user.audioTrack.enabled = nextState;
+      setUser({...user, micEnabled: nextState});
     }
-    setUser({...user, micEnabled: nextState});
+  };
+
+  const onAdjustVolume = (userId, volume) => {
+    const targetUser = remoteUsers[userId] || user;
+    if (targetUser && targetUser.audioTrack) {
+      targetUser.audioTrack._setVolume(volume);
+    }
   };
 
   const onStartLocalStream = async () => {
@@ -80,7 +88,11 @@ export const useCallManager = sessionId => {
         },
       });
 
-      setUser({...user, stream});
+      setUser({
+        ...user,
+        videoTrack: stream.getVideoTracks()[0],
+        audioTrack: stream.getAudioTracks()[0],
+      });
     } catch (error) {
       console.warn(error);
     }
@@ -89,9 +101,15 @@ export const useCallManager = sessionId => {
   const createRTCConnection = useEvent(remoteUser => {
     const rtc = new RTCPeerConnection(RTC_CONFIG);
 
-    rtc.addStream(user.stream);
+    if (user.videoTrack) {
+      rtc.addTrack(user.videoTrack);
+    }
 
-    rtc.onicecandidate = event => {
+    if (user.audioTrack) {
+      rtc.addTrack(user.audioTrack);
+    }
+
+    rtc.addEventListener('icecandidate', event => {
       if (event.candidate) {
         socket.current.emit(SESSION_CLIENT_EVENTS.SEND_ICE_CANDIDATES, {
           user: remoteUser,
@@ -102,17 +120,19 @@ export const useCallManager = sessionId => {
           },
         });
       }
-    };
+    });
 
-    rtc.onaddstream = event => {
+    rtc.addEventListener('track', event => {
+      const track = event.track.kind === 'audio' ? 'audioTrack' : 'videoTrack';
       setRemoteUsers(remoteUsers => ({
         ...remoteUsers,
         [remoteUser]: {
+          ...(remoteUsers[remoteUser] || {}),
           id: remoteUser,
-          stream: event.stream,
+          [track]: event.track,
         },
       }));
-    };
+    });
 
     return rtc;
   });
@@ -127,7 +147,8 @@ export const useCallManager = sessionId => {
       ...remoteUsers,
       [user]: {
         id: user,
-        stream: null,
+        videoTrack: null,
+        audioTrack: null,
       },
     });
     socket.current.emit(SESSION_CLIENT_EVENTS.SEND_OFFER, {user, offer});
@@ -174,21 +195,19 @@ export const useCallManager = sessionId => {
   });
 
   const onResetState = useEvent(() => {
-    if (user.stream) {
-      for (const track of user.stream.getTracks()) {
-        track.stop();
-      }
-    }
+    user.videoTrack?.stop();
+    user.audioTrack?.stop();
+
     remoteUsersRtc.current = {};
     setUser(DEFAULT_USER_STATE);
     setRemoteUsers([]);
   });
 
   useEffect(() => {
-    if (user.stream) {
+    if (user.videoTrack) {
       onJoinSession();
     }
-  }, [user.stream]);
+  }, [user.videoTrack]);
 
   useEffect(() => {
     const initCallManager = async () => {
@@ -243,5 +262,6 @@ export const useCallManager = sessionId => {
     onSwitchCamera,
     onToggleCamera,
     onToggleMic,
+    onAdjustVolume,
   };
 };

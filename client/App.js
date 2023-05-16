@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   Platform,
   KeyboardAvoidingView,
@@ -25,6 +25,7 @@ import IconContainer from './components/IconContainer';
 import {APP_VIEW} from './consts';
 import {useCallManager} from './hooks/useCallManager';
 import {generateLocalSessionId} from './utils';
+import {Slider} from './components/Slider';
 
 const VIDEO_DIMENSIONS_PX = 170;
 
@@ -88,7 +89,7 @@ const JoinScreen = ({onJoinSession}) => {
                 fontSize: 18,
                 color: '#D0D4DD',
               }}>
-              Your Session ID
+              Your Session IDs
             </Text>
             <View
               style={{
@@ -172,8 +173,14 @@ const JoinScreen = ({onJoinSession}) => {
 };
 
 const WebrtcRoomScreen = ({sessionId, onResetState}) => {
-  const {user, remoteUsers, onSwitchCamera, onToggleCamera, onToggleMic} =
-    useCallManager(sessionId);
+  const {
+    user,
+    remoteUsers,
+    onSwitchCamera,
+    onToggleCamera,
+    onToggleMic,
+    onAdjustVolume,
+  } = useCallManager(sessionId);
 
   return (
     <View
@@ -192,7 +199,9 @@ const WebrtcRoomScreen = ({sessionId, onResetState}) => {
           style={{flex: 1}}
           itemDimension={VIDEO_DIMENSIONS_PX}
           data={[user, ...toArray(remoteUsers)]}
-          renderItem={({item}) => <VideoCard user={item} />}
+          renderItem={({item}) => (
+            <VideoCard user={item} onAdjustVolume={onAdjustVolume} />
+          )}
         />
       </View>
       <View
@@ -256,44 +265,72 @@ const WebrtcRoomScreen = ({sessionId, onResetState}) => {
   );
 };
 
-const VideoCard = ({user}) => {
+const VideoCard = ({user, onAdjustVolume}) => {
+  const [stream] = useState(new MediaStream());
+  const [hasVideo, setHasVideo] = useState(false);
+
+  const onChangeVolume = volume => {
+    onAdjustVolume(user.id, volume);
+  };
+
+  useEffect(() => {
+    if (user.audioTrack) {
+      stream.addTrack(user.audioTrack);
+    }
+  }, [user.audioTrack]);
+
+  useEffect(() => {
+    if (user.videoTrack) {
+      stream.addTrack(user.videoTrack);
+      setHasVideo(true);
+    }
+  }, [user.videoTrack]);
+
   return (
-    <View
-      style={{
-        position: 'relative',
-        backgroundColor: '#000000',
-        height: VIDEO_DIMENSIONS_PX,
-        borderRadius: 7,
-        borderColor: '#2B3034',
-        borderWidth: 1,
-      }}>
+    <>
       <View
         style={{
-          position: 'absolute',
-          bottom: 7,
-          left: 7,
-          zIndex: 1,
-          backgroundColor: '#818289',
-          padding: 5,
+          position: 'relative',
+          backgroundColor: '#000000',
+          height: VIDEO_DIMENSIONS_PX,
           borderRadius: 7,
-          opacity: 0.8,
+          borderColor: '#2B3034',
+          borderWidth: 1,
         }}>
-        <Text
+        <View
           style={{
-            fontSize: 10,
-            color: '#FFFFFF',
+            position: 'absolute',
+            bottom: 7,
+            left: 7,
+            zIndex: 1,
+            backgroundColor: '#818289',
+            padding: 5,
+            borderRadius: 7,
+            opacity: 0.8,
+            overflow: 'hidden',
           }}>
-          {user.id}
-        </Text>
+          <Text
+            style={{
+              fontSize: 10,
+              color: '#FFFFFF',
+            }}>
+            {user.id}
+          </Text>
+        </View>
+        {stream && hasVideo ? (
+          <RTCView
+            objectFit={'cover'}
+            style={{flex: 1, backgroundColor: '#000000', borderRadius: 7}}
+            streamURL={stream.toURL()}
+          />
+        ) : (
+          <Text>No video</Text>
+        )}
       </View>
-      {user.stream && (
-        <RTCView
-          objectFit={'cover'}
-          style={{flex: 1, backgroundColor: '#050A0E', borderRadius: 7}}
-          streamURL={user.stream.toURL()}
-        />
-      )}
-    </View>
+      <View style={{height: 30, width: '100%'}}>
+        <Slider onChangeValue={onChangeVolume} />
+      </View>
+    </>
   );
 };
 
